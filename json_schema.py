@@ -20,7 +20,7 @@ def json_string(tree: BNFTree):
                     [
                         SequenceNode(tree, [CharNode(tree, b"\\"), NotCharNode(tree, b"\n")]),
                         PopNode(tree, CharNode(tree, b'"'), depth=2),
-                        NotCharNode(tree, b"\n"),
+                        NotCharNode(tree, b'\n"'),
                     ],
                 ),
             ),

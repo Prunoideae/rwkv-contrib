@@ -1,3 +1,4 @@
+from collections import deque
 from typing import TYPE_CHECKING, Any, Generator, Optional
 
 import numpy as np
@@ -86,14 +87,23 @@ class BNFPipeline:
                 probs = probs ** (1.0 / args.temperature)
             out = torch.multinomial(probs, num_samples=1)[0]
             token = int(out)
-       
+
         return token
 
     def dump_logits(self, logits_cache: str = None) -> None:
         logits_cache = logits_cache or self.logits_cache
         self.tree.dump_logits(logits_cache)
 
-    def infer(self, tokens: list[int], *, state: Any = None, args: GenerationArgs = None, penalty: Penalty = None) -> tuple[Optional[int], Any]:
+    def infer(
+        self,
+        tokens: list[int],
+        *,
+        state: Any = None,
+        args: GenerationArgs = None,
+        penalty: Penalty = None,
+        update_tokens_penalty: bool = True,
+        intialize_callstack: bool = True,
+    ) -> tuple[Optional[int], Any]:
         """
         Infer the next token from a list of tokens.
 
@@ -105,8 +115,13 @@ class BNFPipeline:
         args = args or self.default_args
         penalty = penalty or self.penalty
 
-        for token in tokens:
-            penalty.update(token)
+        if intialize_callstack:
+            self.callstack = []
+            self.initial_node.add_to_stack(self.callstack)
+
+        if update_tokens_penalty:
+            for token in tokens:
+                penalty.update(token, args)
 
         for i in range(0, len(tokens), args.chunk_len):
             chunk = tokens[i : i + args.chunk_len]
@@ -114,7 +129,7 @@ class BNFPipeline:
 
         for n in args.token_ban:
             out[n] = -float("inf")
-        
+
         out = penalty.transform(out, args)
         out = self.tree.filter_tensor(out, self.callstack)
 
@@ -123,7 +138,6 @@ class BNFPipeline:
         if token in args.token_stop:
             return None, state
 
-        penalty.update(token)
         return token, state
 
     def generate(self, ctx: str, generation_length: int = 100, *, state=None, args: GenerationArgs = None, clear_penalty: bool = True) -> Generator[str, None, None]:
@@ -137,7 +151,7 @@ class BNFPipeline:
             self.penalty.clear()
 
         tokens_tmp = []
-        token, state = self.infer(self.encode(ctx), state=state, args=args)
+        token, state = self.infer(self.encode(ctx), state=state, args=args, intialize_callstack=False)
         while token is not None and generation_length > 0:
             generation_length -= 1
             tokens_tmp.append(token)
@@ -147,4 +161,70 @@ class BNFPipeline:
                 tokens_tmp = []
             if self.tree.deflate(self.callstack):
                 break
-            token, state = self.infer([token], state=state, args=args)
+            token, state = self.infer([token], state=state, args=args, intialize_callstack=False)
+
+
+class StatefulBNFPipeline(BNFPipeline):
+    state: Any
+
+    def __init__(
+        self,
+        model: "RWKV",
+        tree: BNFTree,
+        initial_node: Node,
+        tokenizer: Tokenizer[str] = RWKVTokenizer(),
+        penalty: Penalty = None,
+        default_args: GenerationArgs = None,
+        logits_cache: str = None,
+        init_state: Any = None,
+        init_prompt: str = None,
+    ) -> None:
+        super().__init__(model, tree, initial_node, tokenizer, penalty, default_args, logits_cache)
+
+        self.state = init_state
+        if init_prompt is not None:
+            self.push(init_prompt)
+
+    def infer(self, tokens: list[int], *, state: Any = None, args: GenerationArgs = None, penalty: Penalty = None) -> tuple[int | None, Any]:
+        if state is None:
+            state = self.state
+            token, self.state = super().infer(tokens, state=state, args=args, penalty=penalty)
+            return token, self.state
+        return super().infer(tokens, state=state, args=args, penalty=penalty)
+
+    def push(self, ctx: str):
+        tokens = self.encode(ctx)
+        _, self.state = self.infer(tokens, state=self.state, args=self.default_args, penalty=self.penalty)
+
+
+class RecallableBNFPipeline(StatefulBNFPipeline):
+    history: deque[Any]
+
+    def __init__(
+        self,
+        model: "RWKV",
+        tree: BNFTree,
+        initial_node: Node,
+        tokenizer: Tokenizer[str] = RWKVTokenizer(),
+        penalty: Penalty = None,
+        default_args: GenerationArgs = None,
+        logits_cache: str = None,
+        max_history: int = 10,
+        init_state: Any = None,
+        init_prompt: str = None,
+    ) -> None:
+        super().__init__(model, tree, initial_node, tokenizer, penalty, default_args, logits_cache, init_state, init_prompt)
+        self.history = deque(maxlen=max_history)
+        self.history.append(self.state)
+
+    def recall(self, depth=1) -> Any:
+        for _ in range(depth):
+            self.state = self.history.pop()
+
+    def push(self, ctx: str):
+        self.history.append(self.state)
+        return super().push(ctx)
+
+    def generate(self, ctx: str, generation_length: int = 100, *, state=None, args: GenerationArgs = None, clear_penalty: bool = True) -> Generator[str, None, None]:
+        self.history.append(self.state)
+        return super().generate(ctx, generation_length, state=state, args=args, clear_penalty=clear_penalty)

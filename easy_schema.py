@@ -20,9 +20,10 @@ def non_newline(tree: BNFTree) -> Node:
 
 
 @cache
-def quoted(tree: BNFTree, quote: tuple[bytes, bytes], inner: Node = None) -> Node:
+def quoted(tree: BNFTree, quote: bytes, inner: Node = None) -> Node:
     if inner is None:
         inner = NotCharNode(tree, b"\n")
+    quote = [bytes([x]) for x in quote]
     start, end = quote
     return SequenceNode(
         tree,
@@ -44,22 +45,22 @@ def quoted(tree: BNFTree, quote: tuple[bytes, bytes], inner: Node = None) -> Nod
 
 @cache
 def asterisks(tree: BNFTree, inner: Node = None) -> Node:
-    return quoted(tree, (b"*", b"*"), inner)
+    return quoted(tree, b"**", inner)
 
 
 @cache
 def parentheses(tree: BNFTree, inner: Node = None) -> Node:
-    return quoted(tree, (b"(", b")"), inner)
+    return quoted(tree, b"()", inner)
 
 
 @cache
 def square_brackets(tree: BNFTree, inner: Node = None) -> Node:
-    return quoted(tree, (b"[", b"]"), inner)
+    return quoted(tree, b"[]", inner)
 
 
 @cache
 def curly_brackets(tree: BNFTree, inner: Node = None) -> Node:
-    return quoted(tree, (b"{", b"}"), inner)
+    return quoted(tree, b"{}", inner)
 
 
 @cache
@@ -132,10 +133,10 @@ def numbered_list(tree: BNFTree, item_count: int, item_constraint: Node = None) 
     return SequenceNode(tree, number_items)
 
 
-def named_list(tree: BNFTree, bullet: bytes, nodes: dict[str, Node | None]):
+def named_list(tree: BNFTree, bullet: bytes | None, nodes: dict[str, Node | None]):
     node_sequence = []
     for key, value in nodes.items():
-        node_sequence.append(literal(tree, bullet + b" " + key.encode() + b": "))
+        node_sequence.append(literal(tree, (bullet + b" " if bullet is not None else b"") + key.encode() + b": "))
         if value is None:
             value = non_newline(tree)
         node_sequence.append(value)
@@ -144,6 +145,7 @@ def named_list(tree: BNFTree, bullet: bytes, nodes: dict[str, Node | None]):
     return SequenceNode(tree, node_sequence)
 
 
+@cache
 def choices(tree, *args: str):
     args: list[list[bytes]] = [[bytes([y]) for y in x.encode()] for x in args]
     # make trie of all strings
@@ -172,3 +174,25 @@ def choices(tree, *args: str):
         )
 
     return trie_to_node(trie)
+
+
+def list_line(tree, item_constraint: Node = None):
+    if item_constraint is None:
+        item_constraint = non_newline(tree)
+    return SequenceNode(
+        tree,
+        [
+            item_constraint,
+            RepeatNode(
+                tree,
+                SequenceNode(
+                    tree,
+                    [
+                        CharNode(tree, b","),
+                        CharNode(tree, b" "),
+                        item_constraint,
+                    ],
+                ),
+            ),
+        ],
+    )

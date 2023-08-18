@@ -45,18 +45,18 @@ class NotCharNode(SimpleNode):
     Represents a node that accepts any character except a single character.
     """
 
-    char: bytes
+    chars: list[bytes]
 
     def __init__(self, bnf_tree: BNFTree, char: bytes) -> None:
-        self.char = char
+        self.chars = [bytes([x]) for x in char]
         super().__init__(bnf_tree)
 
     def accept_character(self, char: bytes | None, callstack: list[tuple[int, int]]) -> bool:
-        return self.char != char
+        return char not in self.chars
 
     @cache
     def get_logits(self) -> set[int]:
-        return {k for k, v in token_table.items() if not v.startswith(self.char)}
+        return {k for k, v in token_table.items() if all(not v.startswith(x) for x in self.chars)}
 
 
 class WildcardNode(SimpleNode):

@@ -24,6 +24,7 @@ class GenerationArgs:
     top_k: int = 0
     alpha_frequency: float = 0.2
     alpha_presence: float = 0.2
+    alpha_decay: float = 0.9
     token_ban: List[int] = field(default_factory=list)
     token_stop: List[int] = field(default_factory=list)
     chunk_len: int = 256
@@ -105,7 +106,7 @@ class Pipeline(Generic[T]):
         penalty = penalty or self.penalty
 
         for token in tokens:
-            penalty.update(token)
+            penalty.update(token, args)
 
         for i in range(0, len(tokens), args.chunk_len):
             chunk = tokens[i : i + args.chunk_len]
@@ -119,7 +120,6 @@ class Pipeline(Generic[T]):
         if token in args.token_stop:
             return None, state
 
-        penalty.update(token)
         return token, state
 
     def generate(self, ctx: T, generation_length: int = 100, *, state=None, args: GenerationArgs = None, clear_penalty: bool = True) -> Generator[T, None, None]:
@@ -242,7 +242,7 @@ class StatefulPipeline(Generic[T]):
         args = args or self.default_args
 
         for token in tokens:
-            self.penalty.update(token)
+            self.penalty.update(token, args)
 
         for i in range(0, len(tokens), args.chunk_len):
             chunk = tokens[i : i + args.chunk_len]
@@ -256,7 +256,6 @@ class StatefulPipeline(Generic[T]):
         if token in args.token_stop:
             return None, self.state
 
-        self.penalty.update(token)
         self.last_token = token
         return token, self.state
 
