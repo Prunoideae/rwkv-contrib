@@ -14,10 +14,10 @@ if True:
     environ["RWKV_JIT_ON"] = "1"
     from rwkv.model import RWKV
 
-from rwkv_contrib.bnf import BNFTree, setup_tokens
-from rwkv_contrib.tokenizer import RWKVTokenizer
-from rwkv_contrib import bnf
-from rwkv_contrib.grammar_pipeline import BNFPipeline
+from bnf import BNFTree, setup_tokens
+from tokenizer import RWKVTokenizer
+import bnf
+from grammar_pipeline import BNFPipeline
 
 summary_tree = BNFTree()
 
